@@ -1,6 +1,6 @@
 import { decode, encode } from "fast-png"
 import path from "path"
-import { $, file, write as writeFile } from "bun"
+import { $, file as bunFile, write as writeFile } from "bun"
 import fs from "fs/promises"
 
 type Image = number[][]
@@ -49,27 +49,37 @@ export async function openTmpFolder(pth: string, {commonName, ext = "png", numer
   let n = 1
 
   function file(name: string) {
-    const fileName = path.join(pth, `${commonName !== undefined ? `${commonName}-` : ""}${numerate ? `${n++}-` : ""}${name}.${ext}`)
-    if (known.has(fileName)) throw new Error("Filename not unique")
-    known.add(fileName)
+    const fileName = `${commonName !== undefined ? `${commonName}-` : ""}${numerate ? `${n++}-` : ""}${name}.${ext}`
+    
+    const filePath = path.join(pth, fileName)
+
+    if (known.has(filePath)) throw new Error("Filename not unique")
+    known.add(filePath)
     const ret = {
-      async write(data: any, freeImmediately = false) {
-        await writeFile(fileName, Buffer.from(data))
-        if (freeImmediately) ret.free()
-        return ret
+      write(data: Uint8Array) {
+        const prom = new Promise(async (res) => {
+          await writeFile(filePath, Buffer.from(data))
+          res(ret)
+        }) as Promise<typeof ret> & { free: (...a: Parameters<typeof ret["free"]>) => Promise<ReturnType<typeof ret["free"]>> }
+        prom.free = async () => {
+          await prom
+          return ret.free()
+        }
+
+        return prom
       },
-      async writeImg(img: number[][], freeImmediately?: boolean) {
-        await ret.write(encodeBWPngFromMatrix(img), freeImmediately)
-        return ret
+      writeImg(img: number[][]) {
+        return ret.write(encodeBWPngFromMatrix(img))
       },
       fileName,
+      filePath,
       free() {
-        known.delete(fileName)
-        toBeDel.add(fileName)
-        return fileName
+        known.delete(filePath)
+        toBeDel.add(filePath)
+        return filePath
       },
       read() {
-        return file(fileName)
+        return bunFile(filePath)
       }
     }
     return ret
@@ -162,21 +172,25 @@ export function convolution2D(img: number[][], kernel: number[][]) {
 
 
 export function encodeBWPngFromMatrix(image: number[][]) {
-  const data = new Uint8Array(image.length * image[0].length) as Uint8Array<ArrayBuffer>
-  for (let i = 0; i < image.length; i++) {
-    for (let j = 0; j < image[0].length; j++) {
-      data[i * image[0].length + j] = image[i][j] * 255
+  // Calculate dimensions
+  const height = image.length;
+  const width = image[0].length;
+  
+  // Create flat data array in proper order
+  const data = new Uint8Array(height * width) as Uint8Array<ArrayBuffer>
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      data[y * width + x] = Math.max(0, Math.min(255, Math.round(image[y][x] * 255)));
     }
   }
 
   return encode({
     data,
     channels: 1,
-    width: image.length,
-    height: image[0].length,
+    width: width,       // Width is number of columns
+    height: height,     // Height is number of rows
     depth: 8
   })
-
 }
 
 
@@ -193,15 +207,14 @@ export function decodeRGBPngToBwMatrix(imageBinary: Uint8Array) {
       rgb.push(imgData.data[i * imgData.channels + j] / 255)
     }
 
-    // bwImg.push(calculateBrightness(...rgb))
     bwImg.push(calculateBrightness(...rgb))
   }
 
   const img = [] as number[][]
-  for (let i = 0; i < imgData.width; i++) {
+  for (let i = 0; i < imgData.height; i++) {
     const row = []
-    for (let j = 0; j < imgData.height; j++) {
-      row.push(bwImg[i * imgData.height + j])
+    for (let j = 0; j < imgData.width; j++) {
+      row.push(bwImg[i * imgData.width + j])
     }
     img.push(row)
   }
