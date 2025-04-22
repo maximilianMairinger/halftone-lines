@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",        // Enables modern JavaScript features, including top-level await
+    "module": "ES2022",        // Ensures support for ES modules
+    "moduleResolution": "node", // Optional: Helps resolve modules in a Node.js environment
+    "strict": false,            // Optional: Ensures strict type checking
+    "esModuleInterop": true,    // Optional: Enables interoperability with CommonJS modules
+    // "lib": ["es2022"]
+
+  }
+}
