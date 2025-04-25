@@ -2,8 +2,11 @@ import { $, file, write } from "bun"
 import fs from "fs/promises"
 import path from "path"
 import { decode, encode } from "fast-png"
-import { convolution2D, decodeRGBPngToBwMatrix, downsampleBWImage, encodeBWPngFromMatrix, invertImage, makeWhiteOffWhite, openTmpFolder } from "./util"
+import { centerIrregularImageOnDiagonal, convolution2D, decodeRGBPngToBwMatrix, downsampleBWImage, encodeBWPngFromMatrix, invertImage, kernel1d, makeWhiteOffWhite, openTmpFolder } from "./util"
 import sani from "sanitize-against"
+import { optimize } from 'svgo';
+import { quantizeHalftoneImg, vectorizeQuantizationOfHalftoneImage } from "./toPath"
+import timoi from "timoi"
 
 const inpPath = Bun.argv[2]
 sani(String)(inpPath, "input path invalid")
@@ -47,16 +50,25 @@ const kernel4 = [
 // config
 const tmpLocalPath = "tmp"
 const edgeDetectionKernel = kernel2
-const halftoneKernelSize = 8
+const halftoneKernelSize = 25
 const halftoneAngle = 40
 const downSampleBitrate = 6
 
+// assumed from halftone_lines_cmd
+export const assumedLineHeight = 20
 
 
+console.log(`Starting with options`)
+console.table({
+  halftoneKernelSize,
+  halftoneAngle,
+  downSampleBitrate
+})
 
+const tmpFile = await openTmpFolder(tmpLocalPath, {commonName: inpBaseName, defaultExt: "png", numerate: true})
 
-const tmpFile = await openTmpFolder(tmpLocalPath, {commonName: inpBaseName, ext: "png", numerate: true})
-
+const totalTimer = timoi("total")
+const preprocessingTimer = timoi("preprocessing")
 await tmpFile("bw").writeImg(img).free()
 img = downsampleBWImage(img, downSampleBitrate)
 await tmpFile("downsampled").writeImg(img).free()
@@ -71,29 +83,53 @@ await tmpFile("makeWhiteOffWhite").writeImg(img).free()
 
 const preParsedImg = await tmpFile("preParsedImg").writeImg(img)
 
+preprocessingTimer()
 
-// // this is because halftone_lines_cmd outputs into 
-// const outPathFromHalftoneScript = `out-${tmpLocalPath}`
-// await fs.rmdir(outPathFromHalftoneScript, {recursive: true})
-// await fs.mkdir(outPathFromHalftoneScript)
-await $`cd ${tmpLocalPath} && python3 ../halftone_lines_cmd.py ${preParsedImg.fileName} --kernel ${halftoneKernelSize} --angle ${halftoneAngle}`
+const halftoneifyTimer = timoi("halftoneify")
+
+await $`cd ${tmpLocalPath} && python3 ../halftone_lines_cmd.py ${preParsedImg.fileName} --kernel ${halftoneKernelSize} --angle ${halftoneAngle} --no-verbose`
 preParsedImg.free()
+
+halftoneifyTimer()
 
 const halftoneOutFilePath = `${tmpLocalPath}/out-${preParsedImg.fileName}` // it cannot be changed and is this weird...
 const halfTonedImg = await tmpFile("halfToned").write(await fs.readFile(halftoneOutFilePath))
 await fs.unlink(halftoneOutFilePath)
 
+
 img = decodeRGBPngToBwMatrix(await halfTonedImg.read().bytes())
 halfTonedImg.free()
 
 
-img
+const quanitzationTimer = timoi("quantization")
+const quantization = quantizeHalftoneImg(img, halftoneAngle)
+await tmpFile("quantization").writeImg(centerIrregularImageOnDiagonal(quantization)).free()
+quanitzationTimer()
+
+const vectorizationTimer = timoi("vectorization")
+const rawSvg = vectorizeQuantizationOfHalftoneImage(quantization, halftoneAngle, 20, 10, 1, 2)
+vectorizationTimer()
+
+tmpFile("svgRaw.svg").write(rawSvg)
 
 
-// await tmpFile("end").writeImg(img)
+const svgOptTimer = timoi("svg opt")
+// Optimize SVG with SVGO using common defaults
+const optimizedSvg = optimize(rawSvg, {
+  multipass: true, // Apply optimizations multiple times for better results
+  plugins: [
+    'preset-default', // Contains most common optimizations
+    'removeDimensions', // Remove width/height when viewBox exists
+    'sortAttrs', // Sort element attributes for better gzip compression
+    'removeOffCanvasPaths' // Remove paths outside viewBox
+  ]
+});
+
+svgOptTimer()
+
+// Save the optimized SVG
+tmpFile("svgOptimized.svg").write(optimizedSvg.data);
 
 
 
-
-
-// await tmpFile.cleanup()
+console.log(`---- Done (took ${totalTimer.str()}) ----`)

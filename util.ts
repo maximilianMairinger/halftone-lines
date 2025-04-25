@@ -42,13 +42,19 @@ export function downsampleBWImage(img: Image, nColors: number = 255) {
   )
 }
 
-export async function openTmpFolder(pth: string, {commonName, ext = "png", numerate = false}: {commonName?: string, ext?: string, numerate?: boolean}) {
+export async function openTmpFolder(pth: string, {commonName, defaultExt = "png", numerate = false}: {commonName?: string, defaultExt?: string, numerate?: boolean}) {
   const toBeDel = new Set<string>()
   const known = new Set<string>()
   await fs.mkdir(pth, { recursive: true })
   let n = 1
 
   function file(name: string) {
+    let ext = defaultExt
+    if (path.extname(name) !== "") {
+      ext = path.extname(name).slice(1)
+      name = path.basename(name, path.extname(name))
+    }
+
     const fileName = `${commonName !== undefined ? `${commonName}-` : ""}${numerate ? `${n++}-` : ""}${name}.${ext}`
     
     const filePath = path.join(pth, fileName)
@@ -56,9 +62,9 @@ export async function openTmpFolder(pth: string, {commonName, ext = "png", numer
     if (known.has(filePath)) throw new Error("Filename not unique")
     known.add(filePath)
     const ret = {
-      write(data: Uint8Array) {
+      write(data: Uint8Array | string) {
         const prom = new Promise(async (res) => {
-          await writeFile(filePath, Buffer.from(data))
+          await writeFile(filePath, Buffer.from(data as any))
           res(ret)
         }) as Promise<typeof ret> & { free: (...a: Parameters<typeof ret["free"]>) => Promise<ReturnType<typeof ret["free"]>> }
         prom.free = async () => {
@@ -117,6 +123,92 @@ export function invertImage(img: number[][]) {
   return out
 }
 
+
+
+
+export function sum(arr: number[]) {
+  return arr.reduce((a, b) => a + b, 0)
+}
+
+export function abs(arr: number): number
+export function abs(arr: number[]): number[]
+export function abs(arr: number[] | number) {
+  if (Array.isArray(arr)) {
+    return arr.map((e) => Math.abs(e))
+  }
+  return Math.abs(arr)
+}
+
+export function max(arr: number[]) {
+  let max = -Infinity
+  for (const e of arr) {
+    if (e > max) max = e
+  }
+  return max
+}
+
+
+export function degToRad(degree: number) {
+  return degree * Math.PI / 180
+}
+export function radToDeg(radian: number) {
+  return radian * 180 / Math.PI
+}
+
+export function clearNaN(arr: number[]) {
+  const newArr = []
+  for (const item of arr) {
+    if (!isNaN(item)) {
+      newArr.push(item)
+    }
+  }
+  return newArr
+}
+
+export function rotateByAngle(point: [number, number], angleDeg: number): [number, number] {
+  const rad = degToRad(angleDeg);
+  const x = point[0];
+  const y = point[1];
+  return [
+    x * Math.cos(rad) - y * Math.sin(rad),
+    x * Math.sin(rad) + y * Math.cos(rad)
+  ];
+};
+
+export function min(arr: number[]) {
+  let min = Infinity
+  for (const e of arr) {
+    if (e < min) min = e
+  }
+  return min
+}
+
+
+export function centerIrregularImageOnDiagonal(image: number[][]): number[][] {
+  // Find max row length
+  const height = image.length;
+  let maxWidth = 0;
+  for (let y = 0; y < height; y++) {
+    maxWidth = Math.max(maxWidth, image[y].length);
+  }
+  
+  // Create new rectangular array initialized with zeros
+  const centeredImage: number[][] = Array(height).fill(0).map(() => Array(maxWidth).fill(0));
+  
+  // Copy each row with appropriate padding
+  for (let y = 0; y < height; y++) {
+    const rowWidth = image[y].length;
+    // Calculate padding to center the row
+    const leftPadding = Math.floor((maxWidth - rowWidth) / 2);
+    
+    // Copy values from original row to centered position
+    for (let x = 0; x < rowWidth; x++) {
+      centeredImage[y][leftPadding + x] = image[y][x];
+    }
+  }
+  
+  return centeredImage;
+}
 
 
 export function convolution2D(img: number[][], kernel: number[][]) {
@@ -221,6 +313,31 @@ export function decodeRGBPngToBwMatrix(imageBinary: Uint8Array) {
 
   return img
 }
+
+export const kernel2d = {
+  uniformKernel(size: number) {
+    const kernel = [] as number[][]
+    for (let i = 0; i < size; i++) {
+      const row = []
+      for (let j = 0; j < size; j++) {
+        row.push(1 / (size * size))
+      }
+      kernel.push(row)
+    }
+    return kernel
+  }
+}
+
+export const kernel1d = {
+  uniformKernel(size: number) {
+    const kernel = [] as number[]
+    for (let i = 0; i < size; i++) {
+      kernel.push(1 / size)
+    }
+    return kernel
+  }
+}
+
 
 
 
