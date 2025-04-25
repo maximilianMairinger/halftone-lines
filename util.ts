@@ -99,6 +99,12 @@ export async function openTmpFolder(pth: string, {commonName, defaultExt = "png"
 }
 
 
+export function round(x: number, nPrec: number) {
+  const factor = 10**nPrec
+  return Math.round(x * factor) / factor
+}
+
+
 export function makeWhiteOffWhite(img: number[][]) {
   const out = [] as number[][]
   for (let i = 0; i < img.length; i++) {

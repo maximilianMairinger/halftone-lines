@@ -107,7 +107,15 @@ await tmpFile("quantization").writeImg(centerIrregularImageOnDiagonal(quantizati
 quanitzationTimer()
 
 const vectorizationTimer = timoi("vectorization")
-const rawSvg = vectorizeQuantizationOfHalftoneImage(quantization, halftoneAngle, 20, 10, 1, 2)
+const rawSvg = vectorizeQuantizationOfHalftoneImage(quantization, {
+  angleDegree: halftoneAngle,
+  maxAmplitude: 20,
+  lineSpacing: 10,
+  noiseFrequency: 1,
+  amplitudeScale: 5,
+  moveBackAndForth: true
+})
+
 vectorizationTimer()
 
 tmpFile("svgRaw.svg").write(rawSvg)
@@ -128,7 +136,14 @@ const optimizedSvg = optimize(rawSvg, {
 svgOptTimer()
 
 // Save the optimized SVG
-tmpFile("svgOptimized.svg").write(optimizedSvg.data);
+const svgOpt = await tmpFile("svgOptimized.svg").write(optimizedSvg.data);
+
+const gCodeGenTimer = timoi("gcode generation")
+const gocodeFile = tmpFile("gocode.gcode")
+// 25.4 may be important dunno where it comes from anymore
+await $`svg2gcode/target/release/svg2gcode ${svgOpt.free()} -o ${gocodeFile.filePath} --feedrate 2000 --dpi ${25.4 * 2}`
+
+gCodeGenTimer()
 
 
 

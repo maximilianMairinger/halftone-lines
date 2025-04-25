@@ -58,7 +58,7 @@ export function quantizeHalftoneImg(img: number[][], angleDegree: number, weight
     const densityLine = []
     densityLines.push(densityLine)
 
-    while (y + angledKernel.length >= 0 && x - Math.max(...abs(angledKernel)) < width) {
+    while (y/* + angledKernel.length*/ >= 0 && x /*- Math.max(...abs(angledKernel))*/ < width) {
       const values = clearNaN(angledKernel.map((offset, i) => {
         const ret = (img[y + i]?.[x + offset] ?? NaN) * weighting[i]
         if (img[y + i]) img[y + i][x + offset] = .8
@@ -91,13 +91,18 @@ export function quantizeHalftoneImg(img: number[][], angleDegree: number, weight
 
 
 
-export function vectorizeQuantizationOfHalftoneImage(
-  quantizedImage: number[][],
-  angleDegree: number = 40,
-  maxAmplitude: number = 20,
-  lineSpacing: number = 10,
-  noiseFrequency: number = 10,
-  amplitudeScale: number = 1
+export function vectorizeQuantizationOfHalftoneImage(quantizedImage: number[][],
+  {
+    angleDegree = 40, maxAmplitude = 20, lineSpacing = 10, noiseFrequency = 1, amplitudeScale = 1, noMoveCmd = false, moveBackAndForth = false
+  }: 
+  {
+    angleDegree?: number,
+    maxAmplitude?: number,
+    lineSpacing?: number,
+    noiseFrequency?: number,
+    amplitudeScale?: number,
+    moveBackAndForth?: boolean
+  }
 ) {
   const lineHeight = maxAmplitude + Math.sqrt(2 * lineSpacing**2) 
   const lineHeightAtAngleY = lineHeight / Math.sin(degToRad(90 - angleDegree)) 
@@ -110,7 +115,7 @@ export function vectorizeQuantizationOfHalftoneImage(
 
 
 
-  const paths = []
+  let paths = []
 
   
   for (let rowI = 0; rowI < quantizedImage.length; rowI++) {
@@ -131,16 +136,22 @@ export function vectorizeQuantizationOfHalftoneImage(
       xOffset = lineHeightAtAngleX * (rowI - quantizedImage.length / 2) / 2
     }
 
+    
     for (let x = 0; x < row.length; x += noiseFrequency**-1) {
       const pixelIndex = Math.floor(x)
 
+      
+
       const lightnessValueInv = row[pixelIndex]
       const lightnessValue = 1 - lightnessValueInv
+      debugger
 
       const noise = Math.random() * 2 - 1
-      const noiseWeighted = noise * lightnessValue * maxAmplitude / 2
+      let noiseWeighted = noise * lightnessValue**2 * maxAmplitude / 2 * amplitudeScale
+      // close to 0 should be 0
+      if (Math.abs(noiseWeighted) < maxAmplitude / 2 / 10) noiseWeighted = 0
 
-      const point = [x + xOffset, y + noiseWeighted * amplitudeScale] as const
+      const point = [x + xOffset, y + noiseWeighted] as const
       // let lastViewBoxWidth = viewBoxWidth
       viewBoxWidth = Math.max(viewBoxWidth, point[0])
       viewBoxHeight = Math.max(viewBoxHeight, point[1])
@@ -156,15 +167,54 @@ export function vectorizeQuantizationOfHalftoneImage(
     }
   }
 
+  paths = paths.map((path) => {
+    return path.map((point: Point) => {
+      return [
+        point[0] + 100,
+        point[1] - 100
+      ]
+    })
+  })
+
+  // reduce paths: if line is flat dont add points for nothing
+  const reducedPaths = []
+  let skipping = 0
+  for (const path of paths) {
+    const reducedPath = [path[0]]
+    reducedPaths.push(reducedPath)
+    let lastSlope = NaN
+    for (let i = 1; i < path.length-1; i++) {
+      const thisSlope = path[i][1] - path[i - 1]?.[1]
+      if (Math.abs(thisSlope - lastSlope) > 0.000001) {
+        reducedPath.push(path[i])
+      }
+      else {
+        skipping++
+      }
+      lastSlope = thisSlope
+    }
+    reducedPath.push(path[path.length-1])
+  }
+  paths = reducedPaths
+  console.log("reducing path by", skipping, "nodes")
+
+  if (moveBackAndForth) {
+    paths = paths.map((path: number[], i) => {
+      const forth = i % 2 === 0
+      return forth ? path : path.slice().reverse() 
+    })
+  } 
+
   const pathStr = paths.map((path, nPath) => {
     const commands = path.map(([x, y], i) => {
       if (i === 0) {
-        return `M ${x.toFixed(5)},${y.toFixed(5)}`;
+        return `M ${x.toFixed(5)},${y.toFixed(2)}`;
       }
-      return `L ${x.toFixed(5)},${y.toFixed(5)}`;
+      return `L ${x.toFixed(5)},${y.toFixed(2)}`;
     })
     
-    return `<path name="Path_${nPath}" stroke-width="0.3" transform="rotate(${-angleDegree}deg, ${path[0].join(", ")})" d="${commands.join(' ')}" stroke="black" fill="none"/>`;
+    const forth = !moveBackAndForth || nPath % 2 === 0
+    return `<path name="Path_${nPath}" stroke-width="0.3" transform="rotate(${-angleDegree}deg, ${path[forth ? 0 : path.length-1].join(", ")})" d="${commands.join(' ')}" stroke="black" fill="none"/>`;
   })
 
   const svg = 
@@ -175,6 +225,8 @@ export function vectorizeQuantizationOfHalftoneImage(
   return svg
 
 }
+
+
 
 
 
