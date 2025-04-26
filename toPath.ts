@@ -1,6 +1,6 @@
-import { assumedLineHeight, tmpFile } from "./cli"
+import { tmpFile } from "./cli"
 import { abs, clearNaN, degToRad, max, sum } from "./util"
-
+import clone from "circ-clone"
 
 
 
@@ -13,12 +13,16 @@ export function repeat<T>(what: T, n: number) {
 }
 
 
-export function quantizeHalftoneImg(img: number[][], angleDegree: number, weighting = repeat(1, assumedLineHeight)) {
-  // if (weighting.length !== assumedLineHeight) throw new Error("weighting length must be equal to assumedLineHeight " + assumedLineHeight)
+export function quantizeHalftoneImg(img: number[][], angleDegree: number, weighting_lineHeight: number[] | number) {
+  const weighting = typeof weighting_lineHeight === "number" ? repeat(1, weighting_lineHeight) : weighting_lineHeight
+
+
+  img = img.map((row) => row.map((v) => v))
+
+  const lineHeight = weighting.length
   const height = img.length
   const width = img[0].length
 
-  const lineHeight = assumedLineHeight
   const lineHeightAtAngleY = lineHeight / Math.sin(degToRad(90 - angleDegree))  // confirmed
   const lineHeightAtAngleX = lineHeight / Math.cos(degToRad(90 - angleDegree)) // confirmed
 
@@ -40,14 +44,14 @@ export function quantizeHalftoneImg(img: number[][], angleDegree: number, weight
 
   // applyKernelWithAutoPadding
 
-  const angledKernel = createAngledKernel(angleDegree, Math.ceil(Math.sqrt(assumedLineHeight**2/2)))
+  const angledKernel = createAngledKernel(angleDegree, Math.ceil(Math.sqrt(lineHeight**2/2)))
 
   
   
 
   const nLines = height / lineHeightAtAngleY + width / lineHeightAtAngleX
 
-  const densityLines = []
+  let densityLines = []
 
   for (let line = 0; line < nLines; line++) {
     let x = -angledKernel.length // this seems wrong, shouldnt it be Math.max(...abs(angledKernel))
@@ -79,18 +83,43 @@ export function quantizeHalftoneImg(img: number[][], angleDegree: number, weight
       y = initY - yIncGenerator.next().value
     }
 
-    console.log("line", line, densityLine.length)
+    // console.log("line", line, densityLine.length)
 
   }
 
-  console.log("width", width)
+  const longestLine = max(densityLines.map((line) => line.length))
+  // sig(wink) * hypo = gegen
+  // cos(angle) * hypo = anka
+  const maxHeightLine = Math.sin(degToRad(angleDegree)) * longestLine
+  const maxWidthLine = Math.cos(degToRad(angleDegree)) * longestLine
+
+  const realHeight = img.length
+  const realWidth = img[0].length
+
+  // console.log({
+  //   longestLine,
+  //   maxHeightLine,
+  //   maxWidthLine,
+  //   realHeight,
+  //   realWidth
+  // })
+
+  // densityLines = densityLines.map((line) => {
+  //   if (line.length > realHeight || line.length > realWidth) {
+  //     console.log("clamping")
+  //     line.length = Math.min(realHeight, realWidth)
+  //   }
+  //   return line
+  // })
+
+
 
 
   tmpFile("densityLines").writeImg(img).free()
 
 
   
-  return densityLines
+  return {quantization: densityLines, sensingOvershoot: Math.max(0, longestLine - realWidth)}
 
   // console.log("nLines", nLines)
   // for (let line = 0; line < nLines; line++) {
@@ -105,19 +134,20 @@ export function quantizeHalftoneImg(img: number[][], angleDegree: number, weight
 
 export function vectorizeQuantizationOfHalftoneImage(quantizedImage: number[][],
   {
-    angleDegree = 40, maxAmplitude = 20, lineSpacing = 10, noiseFrequency = 1, amplitudeScale = 1, moveBackAndForth = false, margin = 0
+    angleDegree, maxAmplitude, noiseFrequency = 1, amplitudeScale = 1, moveBackAndForth = false, margin = 0, imageHeight, sensingOvershoot = 0
   }: 
   {
-    angleDegree?: number,
-    maxAmplitude?: number,
-    lineSpacing?: number,
+    angleDegree: number,
+    maxAmplitude: number,
     noiseFrequency?: number,
     amplitudeScale?: number,
     moveBackAndForth?: boolean,
-    margin?: number | [number, number]
+    margin?: number | [number, number],
+    imageHeight: number,
+    sensingOvershoot?: number
   }
 ) {
-  const lineHeight = maxAmplitude + Math.sqrt(2 * lineSpacing**2) 
+  const lineHeight = maxAmplitude
   const lineHeightAtAngleY = lineHeight / Math.sin(degToRad(90 - angleDegree)) 
   const lineHeightAtAngleX = lineHeight / Math.cos(degToRad(90 - angleDegree))
 
@@ -143,57 +173,42 @@ export function vectorizeQuantizationOfHalftoneImage(quantizedImage: number[][],
     let xOffset = 0
     let y: number
 
+    const rowN = rowI + 1
+
     
-    console.log("row", rowI, row.length, maxRowLen)
-    
-    if (row.length < maxRowLen && rowI < quantizedImage.length / 2) {
-      beforeSwitchN++
-      y = (rowI + 1) * lineHeightAtAngleY / 2
-    }
-    else if (row.length === maxRowLen) {
-      staggeringSwitchN++
-      y = (rowI + 1) * lineHeightAtAngleY / 2
+    // the thing with the sensing overshoot is just my best guess, It may be wrong haha
+    if (rowN * lineHeightAtAngleY < imageHeight + Math.cos(degToRad(angleDegree)) * sensingOvershoot) {
+      y = rowN * lineHeightAtAngleY
     }
     else {
+      y = imageHeight + Math.cos(degToRad(angleDegree)) * sensingOvershoot
       
-      if (rowI > quantizedImage.length - beforeSwitchN) {
-        const untilSwitchN = beforeSwitchN + staggeringSwitchN
-        y = untilSwitchN * lineHeightAtAngleY / 2
-        xOffset = lineHeightAtAngleX * (rowI + 1 - untilSwitchN) / 2
-      }
-      else {
-        staggeringSwitchN++
-        y = (rowI + 1) * lineHeightAtAngleY / 2
-      } 
+      const rowsUsedForHeight = (imageHeight + Math.cos(degToRad(angleDegree)) * sensingOvershoot) / lineHeightAtAngleY
+      xOffset = (rowN - rowsUsedForHeight) * lineHeightAtAngleX
     }
+
 
     
     for (let x = 0; x < row.length; x += noiseFrequency**-1) {
       const pixelIndex = Math.floor(x)
-
+      
       
 
       const lightnessValueInv = row[pixelIndex]
       const lightnessValue = 1 - lightnessValueInv
-      debugger
 
       const noise = Math.random() * 2 - 1
       let noiseWeighted = noise * lightnessValue**2 * maxAmplitude / 2 * amplitudeScale
       // close to 0 should be 0
-      if (Math.abs(noiseWeighted) < maxAmplitude / 2 / 10) noiseWeighted = 0
+      if (Math.abs(noiseWeighted) < maxAmplitude / 10) noiseWeighted = 0
 
-      const point = [x + xOffset, y + noiseWeighted] as const
-      // let lastViewBoxWidth = viewBoxWidth
+      
+      // viewbox calc is still wrong, we need to account for the angle. But for gcode gen this doesnt matter
+      const point = [x / Math.cos(degToRad(angleDegree)) + xOffset, y + noiseWeighted] as const
+    
       viewBoxWidth = Math.max(viewBoxWidth, point[0])
       viewBoxHeight = Math.max(viewBoxHeight, point[1])
-      // if (viewBoxWidth !== lastViewBoxWidth && viewBoxWidth > 220) {
-      //   console.log("hello=")
-      //   console.log("point", point)
-      //   console.log("rowI", rowI)
-      //   console.log("x", x)
-      //   console.log("pixelIndex", pixelIndex)
-      // }
-      
+
       path.push(point)
     }
   }
@@ -247,7 +262,7 @@ export function vectorizeQuantizationOfHalftoneImage(quantizedImage: number[][],
     })
     
     const forth = !moveBackAndForth || nPath % 2 === 0
-    return `<path name="Path_${nPath}" stroke-width="0.3" transform="rotate(${-angleDegree}deg, ${path[forth ? 0 : path.length-1].join(", ")})" d="${commands.join(' ')}" stroke="black" fill="none"/>`;
+    return `<path id="Path_${nPath}" stroke-width="0.3" transform="rotate(${-angleDegree}deg, ${path[forth ? 0 : path.length-1].join(", ")})" d="${commands.join(' ')}" stroke="black" fill="none"/>`;
   })
 
   const svg = 

@@ -50,24 +50,28 @@ const kernel4 = [
 // config
 const tmpLocalPath = "tmp"
 const edgeDetectionKernel = kernel2
-const halftoneKernelSize = 50
+const halftoneKernelSize = 10
 const halftoneAngle = 40
 const downSampleBitrate = 6
-const lineSpacing = 10
 const noiseFrequency = 1.5
 const amplitudeScale = 5
 const margin = 100
-const gCodeFeedrate = 3500
+const gCodeFeedRate = 3500
 
 // assumed from halftone_lines_cmd
-export const assumedLineHeight = 20
+const assumedLineHeight = 20
 
 
 console.log(`Starting with options`)
 console.table({
   halftoneKernelSize,
   halftoneAngle,
-  downSampleBitrate
+  downSampleBitrate,
+  // lineSpacing,
+  noiseFrequency,
+  amplitudeScale,
+  margin,
+  gCodeFeedRate
 })
 
 export const tmpFile = await openTmpFolder(tmpLocalPath, {commonName: inpBaseName, defaultExt: "png", numerate: true})
@@ -107,19 +111,22 @@ halfTonedImg.free()
 
 
 const quanitzationTimer = timoi("quantization")
-const quantization = quantizeHalftoneImg(img, halftoneAngle)
+const { quantization, sensingOvershoot } = quantizeHalftoneImg(img, halftoneAngle, assumedLineHeight)
 await tmpFile("quantization").writeImg(centerIrregularImageOnDiagonal(quantization)).free()
 quanitzationTimer()
+
+console.log("sensingOvershoot", sensingOvershoot)
 
 const vectorizationTimer = timoi("vectorization")
 const rawSvg = vectorizeQuantizationOfHalftoneImage(quantization, {
   angleDegree: halftoneAngle,
-  maxAmplitude: 20,
-  lineSpacing,
+  maxAmplitude: assumedLineHeight,
   noiseFrequency,
   amplitudeScale,
   moveBackAndForth: true,
-  margin
+  margin,
+  imageHeight: img.length,
+  sensingOvershoot
 })
 
 vectorizationTimer()
@@ -147,7 +154,7 @@ const svgOpt = await tmpFile("svgOptimized.svg").write(optimizedSvg.data);
 const gCodeGenTimer = timoi("gcode generation")
 const gocodeFile = tmpFile("gocode.gcode")
 // 25.4 may be important dunno where it comes from anymore
-await $`svg2gcode/target/release/svg2gcode ${svgOpt.free()} -o ${gocodeFile.filePath} --feedrate ${gCodeFeedrate} --dpi ${25.4 * 5}`
+await $`svg2gcode/target/release/svg2gcode ${svgOpt.free()} -o ${gocodeFile.filePath} --feedrate ${gCodeFeedRate} --dpi ${25.4 * 5}`
 
 gCodeGenTimer()
 
