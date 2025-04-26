@@ -1,4 +1,4 @@
-import { assumedLineHeight } from "./cli"
+import { assumedLineHeight, tmpFile } from "./cli"
 import { abs, clearNaN, degToRad, max, sum } from "./util"
 
 
@@ -50,31 +50,43 @@ export function quantizeHalftoneImg(img: number[][], angleDegree: number, weight
   const densityLines = []
 
   for (let line = 0; line < nLines; line++) {
-    let x = -angledKernel.length
+    let x = -angledKernel.length // this seems wrong, shouldnt it be Math.max(...abs(angledKernel))
     const initY = Math.round(kernelBeginPoint + lineHeightAtAngleY * line)
     let y = initY
     const yIncGenerator = angleBasedIncrement(angleDegree)
 
     const densityLine = []
     densityLines.push(densityLine)
+    let nNan = 0
 
-    while (y/* + angledKernel.length*/ >= 0 && x /*- Math.max(...abs(angledKernel))*/ < width) {
+    while (y + angledKernel.length >= 0 && x - Math.max(...abs(angledKernel)) < width) {
       const values = clearNaN(angledKernel.map((offset, i) => {
         const ret = (img[y + i]?.[x + offset] ?? NaN) * weighting[i]
-        if (img[y + i]) img[y + i][x + offset] = .8
-        if (img[y + i]) if (i === 0) img[y + i][x + offset] = .3
+        if (!isNaN(ret)) {
+          if (img[y + i]) img[y + i][x + offset] = .8
+          if (img[y + i]) if (i === 0) img[y + i][x + offset] = .3
+        }
+        
         return ret
       }))
 
       const avg = sum(values) / values.length
       if (!isNaN(avg)) densityLine.push(avg)
+      else nNan++
 
 
       x++
       y = initY - yIncGenerator.next().value
     }
 
+    console.log("line", line, densityLine.length)
+
   }
+
+  console.log("width", width)
+
+
+  tmpFile("densityLines").writeImg(img).free()
 
 
   
@@ -93,7 +105,7 @@ export function quantizeHalftoneImg(img: number[][], angleDegree: number, weight
 
 export function vectorizeQuantizationOfHalftoneImage(quantizedImage: number[][],
   {
-    angleDegree = 40, maxAmplitude = 20, lineSpacing = 10, noiseFrequency = 1, amplitudeScale = 1, noMoveCmd = false, moveBackAndForth = false
+    angleDegree = 40, maxAmplitude = 20, lineSpacing = 10, noiseFrequency = 1, amplitudeScale = 1, moveBackAndForth = false, margin = 0
   }: 
   {
     angleDegree?: number,
@@ -101,7 +113,8 @@ export function vectorizeQuantizationOfHalftoneImage(quantizedImage: number[][],
     lineSpacing?: number,
     noiseFrequency?: number,
     amplitudeScale?: number,
-    moveBackAndForth?: boolean
+    moveBackAndForth?: boolean,
+    margin?: number | [number, number]
   }
 ) {
   const lineHeight = maxAmplitude + Math.sqrt(2 * lineSpacing**2) 
@@ -116,8 +129,10 @@ export function vectorizeQuantizationOfHalftoneImage(quantizedImage: number[][],
 
 
   let paths = []
+  let beforeSwitchN = 0
+  let staggeringSwitchN = 0
 
-  
+  const maxRowLen = Math.max(...quantizedImage.map((row) => row.length))
   for (let rowI = 0; rowI < quantizedImage.length; rowI++) {
     const row = quantizedImage[rowI]
     if (row.length === 0) continue
@@ -127,13 +142,29 @@ export function vectorizeQuantizationOfHalftoneImage(quantizedImage: number[][],
     
     let xOffset = 0
     let y: number
-    // this only works for rectangular images...
-    if (rowI <= quantizedImage.length / 2) {
+
+    
+    console.log("row", rowI, row.length, maxRowLen)
+    
+    if (row.length < maxRowLen && rowI < quantizedImage.length / 2) {
+      beforeSwitchN++
+      y = (rowI + 1) * lineHeightAtAngleY / 2
+    }
+    else if (row.length === maxRowLen) {
+      staggeringSwitchN++
       y = (rowI + 1) * lineHeightAtAngleY / 2
     }
     else {
-      y = (quantizedImage.length / 2 + 1) * lineHeightAtAngleY / 2
-      xOffset = lineHeightAtAngleX * (rowI - quantizedImage.length / 2) / 2
+      
+      if (rowI > quantizedImage.length - beforeSwitchN) {
+        const untilSwitchN = beforeSwitchN + staggeringSwitchN
+        y = untilSwitchN * lineHeightAtAngleY / 2
+        xOffset = lineHeightAtAngleX * (rowI + 1 - untilSwitchN) / 2
+      }
+      else {
+        staggeringSwitchN++
+        y = (rowI + 1) * lineHeightAtAngleY / 2
+      } 
     }
 
     
@@ -167,11 +198,13 @@ export function vectorizeQuantizationOfHalftoneImage(quantizedImage: number[][],
     }
   }
 
+  const marg = typeof margin === "number" ? [margin, margin] : margin
+
   paths = paths.map((path) => {
     return path.map((point: Point) => {
       return [
-        point[0] + 100,
-        point[1] - 100
+        point[0] + marg[0],
+        point[1] - marg[1]
       ]
     })
   })

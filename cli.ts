@@ -50,9 +50,14 @@ const kernel4 = [
 // config
 const tmpLocalPath = "tmp"
 const edgeDetectionKernel = kernel2
-const halftoneKernelSize = 25
+const halftoneKernelSize = 50
 const halftoneAngle = 40
 const downSampleBitrate = 6
+const lineSpacing = 10
+const noiseFrequency = 1.5
+const amplitudeScale = 5
+const margin = 100
+const gCodeFeedrate = 3500
 
 // assumed from halftone_lines_cmd
 export const assumedLineHeight = 20
@@ -65,7 +70,7 @@ console.table({
   downSampleBitrate
 })
 
-const tmpFile = await openTmpFolder(tmpLocalPath, {commonName: inpBaseName, defaultExt: "png", numerate: true})
+export const tmpFile = await openTmpFolder(tmpLocalPath, {commonName: inpBaseName, defaultExt: "png", numerate: true})
 
 const totalTimer = timoi("total")
 const preprocessingTimer = timoi("preprocessing")
@@ -110,10 +115,11 @@ const vectorizationTimer = timoi("vectorization")
 const rawSvg = vectorizeQuantizationOfHalftoneImage(quantization, {
   angleDegree: halftoneAngle,
   maxAmplitude: 20,
-  lineSpacing: 10,
-  noiseFrequency: 1,
-  amplitudeScale: 5,
-  moveBackAndForth: true
+  lineSpacing,
+  noiseFrequency,
+  amplitudeScale,
+  moveBackAndForth: true,
+  margin
 })
 
 vectorizationTimer()
@@ -141,7 +147,7 @@ const svgOpt = await tmpFile("svgOptimized.svg").write(optimizedSvg.data);
 const gCodeGenTimer = timoi("gcode generation")
 const gocodeFile = tmpFile("gocode.gcode")
 // 25.4 may be important dunno where it comes from anymore
-await $`svg2gcode/target/release/svg2gcode ${svgOpt.free()} -o ${gocodeFile.filePath} --feedrate 2000 --dpi ${25.4 * 2}`
+await $`svg2gcode/target/release/svg2gcode ${svgOpt.free()} -o ${gocodeFile.filePath} --feedrate ${gCodeFeedrate} --dpi ${25.4 * 5}`
 
 gCodeGenTimer()
 
